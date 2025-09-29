@@ -54,9 +54,14 @@ def get_aws_credentials [profile: string]: nothing -> record {
     
     # Extract credentials for the specified profile
     let cred_lines = ($creds_content | lines)
-    let profile_start = ($cred_lines | enumerate | where item == $"[($profile)]" | first | get index)
+    let matching_profiles = ($cred_lines | enumerate | where item == $"[($profile)]")
+    let profile_start = if ($matching_profiles | length) > 0 { 
+        $matching_profiles | first | get index 
+    } else { 
+        null 
+    }
     
-    if ($profile_start | describe) == "nothing" {
+    if $profile_start == null {
         error make {
             msg: $"Profile '($profile)' not found in credentials file"
             help: $"Available profiles: (list_aws_profiles | get profile | str join ', ')"
@@ -68,7 +73,7 @@ def get_aws_credentials [profile: string]: nothing -> record {
     let profile_end = if ($next_profile_indices | length) > 0 { $next_profile_indices | first } else { ($cred_lines | length) }
     
     # Extract profile section
-    let profile_section = ($cred_lines | range ($profile_start + 1)..($profile_end - 1) | where ($it | str trim | str length) > 0)
+    let profile_section = ($cred_lines | slice ($profile_start + 1)..($profile_end - 1) | where ($it | str trim | str length) > 0)
     
     mut credentials = {}
     for line in $profile_section {
@@ -134,7 +139,12 @@ def get_profile_region [profile: string]: nothing -> any {
     
     let config_lines = ($config_content | lines)
     let section_name = if $profile == "default" { "[default]" } else { $"[profile ($profile)]" }
-    let profile_start_idx = ($config_lines | enumerate | where item == $section_name | get index | first?)
+    let matching_lines = ($config_lines | enumerate | where item == $section_name)
+    let profile_start_idx = if ($matching_lines | length) > 0 { 
+        $matching_lines | get index | first 
+    } else { 
+        null 
+    }
     
     if $profile_start_idx == null {
         return null
@@ -145,7 +155,7 @@ def get_profile_region [profile: string]: nothing -> any {
     let profile_end = if ($next_section_indices | length) > 0 { $next_section_indices | first } else { ($config_lines | length) }
     
     # Look for region in this section
-    let profile_section = ($config_lines | range ($profile_start_idx + 1)..($profile_end - 1))
+    let profile_section = ($config_lines | slice ($profile_start_idx + 1)..($profile_end - 1))
     
     for line in $profile_section {
         let trimmed = ($line | str trim)
@@ -189,17 +199,25 @@ def validate_credentials [profile: string]: nothing -> record {
 }
 
 # Export AWS credentials as environment variables
-def export_credentials [credentials: record, profile: string]: nothing -> nothing {
+export def export_credentials [credentials: record, profile: string]: nothing -> nothing {
     log info $"Exporting AWS credentials for profile: ($profile)"
     
+    # Print out the credentials being set
+    print $"🔑 Setting AWS credentials:"
+    print $"   AWS_ACCESS_KEY_ID: (ansi yellow)($credentials.aws_access_key_id)(ansi reset)"
+    print $"   AWS_SECRET_ACCESS_KEY: (ansi yellow)($credentials.aws_secret_access_key)(ansi reset)"
+    
     # Export standard AWS environment variables
-    $env.AWS_PROFILE = $profile
-    $env.AWS_ACCESS_KEY_ID = $credentials.aws_access_key_id
-    $env.AWS_SECRET_ACCESS_KEY = $credentials.aws_secret_access_key
+    load-env {
+        AWS_PROFILE: $profile
+        AWS_ACCESS_KEY_ID: $credentials.aws_access_key_id
+        AWS_SECRET_ACCESS_KEY: $credentials.aws_secret_access_key
+    }
     
     # Export session token if available (for temporary credentials)
     if "aws_session_token" in ($credentials | columns) {
-        $env.AWS_SESSION_TOKEN = $credentials.aws_session_token
+        print $"   AWS_SESSION_TOKEN: (ansi yellow)($credentials.aws_session_token)(ansi reset)"
+        load-env { AWS_SESSION_TOKEN: $credentials.aws_session_token }
     } else {
         # Clear any existing session token - check if it exists first
         let aws_session_exists = ("AWS_SESSION_TOKEN" in ($env | columns))
@@ -210,13 +228,15 @@ def export_credentials [credentials: record, profile: string]: nothing -> nothin
     
     # Export region if specified
     if "region" in ($credentials | columns) {
-        $env.AWS_DEFAULT_REGION = $credentials.region
-        $env.AWS_REGION = $credentials.region
+        load-env {
+            AWS_DEFAULT_REGION: $credentials.region
+            AWS_REGION: $credentials.region
+        }
     }
     
     # Set credential expiration warning
     let expiry_time = (date now) + ($CREDENTIAL_TIMEOUT | into duration --unit sec)
-    $env.AWS_CREDENTIAL_EXPIRY = ($expiry_time | format date "%Y-%m-%d %H:%M:%S")
+    load-env { AWS_CREDENTIAL_EXPIRY: ($expiry_time | format date "%Y-%m-%d %H:%M:%S") }
     
     print $"✅ AWS credentials exported for profile: (ansi green)($profile)(ansi reset)"
     print $"   Region: (ansi cyan)($env.AWS_DEFAULT_REGION? | default 'not set')(ansi reset)"
@@ -435,7 +455,7 @@ def mask_sensitive [text: string]: nothing -> string {
 # =============================================================================
 
 # Main command function
-def main [
+export def main [
     profile: string = $DEFAULT_PROFILE  # AWS profile to use
     --sso                              # Use AWS SSO login
     --export-only                     # Only export existing credentials, don't validate

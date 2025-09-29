@@ -93,7 +93,13 @@ def main [
         print $"🚀 Executing: nutest ($cmd_args | str join ' ')"
         print ""
         
-        nutest run-tests ...$nutest_opts
+        # Convert the options list to individual arguments for the command
+        if ($nutest_opts | is-empty) {
+            nutest run-tests
+        } else {
+            let cmd = "nutest run-tests " + ($nutest_opts | str join " ")
+            ^sh -c $cmd
+        }
         
         let end_time = date now
         let duration = $end_time - $start_time
@@ -183,7 +189,15 @@ def show_help []: nothing -> nothing {
 # Individual test suite runners for granular control
 export def run-unit-tests [--fail --verbose]: nothing -> nothing {
     print "🔧 Running Unit Tests (Core Functions)"
-    main "quick" ($fail ? "--fail") ($verbose ? "--verbose")
+    if $fail and $verbose {
+        main "quick" --fail --verbose
+    } else if $fail {
+        main "quick" --fail
+    } else if $verbose {
+        main "quick" --verbose
+    } else {
+        main "quick"
+    }
 }
 
 export def run-integration-tests [--fail --verbose]: nothing -> nothing {
@@ -192,7 +206,8 @@ export def run-integration-tests [--fail --verbose]: nothing -> nothing {
     let opts = if $fail { $opts | append "--fail" } else { $opts }
     let opts = if $verbose { $opts | append "--verbose" } else { $opts }
     
-    nutest run-tests --path "./tests" --match-suites "test_integration" ...$opts
+    let cmd = "nutest run-tests --path \"./tests\" --match-suites \"test_integration\" " + ($opts | str join " ")
+    ^sh -c $cmd
 }
 
 export def run-e2e-tests [--fail --verbose]: nothing -> nothing {
@@ -201,7 +216,8 @@ export def run-e2e-tests [--fail --verbose]: nothing -> nothing {
     let opts = if $fail { $opts | append "--fail" } else { $opts }
     let opts = if $verbose { $opts | append "--verbose" } else { $opts }
     
-    nutest run-tests --path "./tests" --match-suites "test_e2e" ...$opts
+    let cmd = "nutest run-tests --path \"./tests\" --match-suites \"test_e2e\" " + ($opts | str join " ")
+    ^sh -c $cmd
 }
 
 # Test coverage analysis (simulated - shows which functions are tested)

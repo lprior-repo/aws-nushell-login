@@ -336,11 +336,11 @@ def "error handling - should create proper error structures" [] {
 
 #[test] 
 def "error handling - should propagate through function calls" [] {
-    def failing_function []: nothing -> string {
+    def failing_function []: nothing -> any {
         error make { msg: "Inner function failed" }
     }
     
-    def calling_function []: nothing -> string {
+    def calling_function []: nothing -> any {
         failing_function
     }
     
